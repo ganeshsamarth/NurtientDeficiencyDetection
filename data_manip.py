@@ -6,7 +6,11 @@ import os
 
 directory = '/content/drive/My Drive/edl_maize/JPG_Photos/'
 main_directory = '/content/drive/My Drive/Final_unbounded_data/'
-
+def preprocess_input(x):
+    x /= 255.
+    x -= 0.5
+    x *= 2.
+    return x
 fine_images = list()
 deficient_images = list()
 image_list = list()
