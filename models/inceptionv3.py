@@ -34,7 +34,7 @@ from keras.utils.layer_utils import convert_all_kernels_in_model
 from keras.utils.data_utils import get_file
 from keras import backend as K
 from keras.applications.imagenet_utils import decode_predictions
-from keras.applications.imagenet_utils import _obtain_input_shape
+from keras_applications.imagenet_utils import _obtain_input_shape
 from keras.preprocessing import image
 
 
@@ -86,8 +86,8 @@ def conv2d_bn(x,
     return x
 
 
-def InceptionV3(include_top=False,
-                weights='imagenet',
+def InceptionV3(include_top=True,
+                weights=None,
                 input_tensor=None,
                 input_shape=None,
                 pooling='a',
@@ -155,8 +155,7 @@ def InceptionV3(include_top=False,
         input_shape,
         default_size=299,
         min_size=139,
-        data_format=K.image_data_format(),
-        include_top=include_top)
+        data_format=K.image_data_format(),require_flatten=include_top)
 
     if input_tensor is None:
         img_input = Input(shape=input_shape)

@@ -1,4 +1,22 @@
 #alexnet model
+from keras.models import Model,Sequential
+from keras import layers
+from keras.layers import Activation
+from keras.layers import Dense
+from keras.layers import Input, Flatten,Dropout
+from keras.layers import BatchNormalization
+from keras.layers import Conv2D
+from keras.layers import MaxPooling2D
+from keras.layers import AveragePooling2D
+from keras.layers import GlobalAveragePooling2D
+from keras.layers import GlobalMaxPooling2D
+from keras.engine.topology import get_source_inputs
+from keras.utils.layer_utils import convert_all_kernels_in_model
+from keras.utils.data_utils import get_file
+from keras import backend as K
+from keras.applications.imagenet_utils import decode_predictions
+from keras_applications.imagenet_utils import _obtain_input_shape
+from keras.preprocessing import image
 
 def AlexNetModel():
   model = Sequential()

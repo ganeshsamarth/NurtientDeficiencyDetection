@@ -1,128 +1,93 @@
-# squeezenet model
-def SqueezeNet(nb_classes, inputs=(224, 224, 3)):
-    """ Keras Implementation of SqueezeNet(arXiv 1602.07360)
-    Arguments:
-        nb_classes: total number of final categories
+import h5py
+from keras.models import Model
+from keras.layers import Input, Convolution2D, MaxPooling2D, Dropout, GlobalAveragePooling2D, concatenate, Activation, ZeroPadding2D
+from keras.layers import AveragePooling2D, Flatten
+from keras.layers.normalization import BatchNormalization
+from keras import backend as K
 
-        inputs -- shape of the input images (channel, cols, rows)
+
+def FireModule(s_1x1, e_1x1, e_3x3, name):
+    """FireModule
+
+        Fire module for the SqueezeNet model. 
+        Implements the expand layer, which has a mix of 1x1 and 3x3 filters, 
+        by using two conv layers concatenated in the channel dimension. 
+
+    :param s_1x1: Number of 1x1 filters in the squeeze layer
+    :param e_1x1: Number of 1x1 filters in the expand layer
+    :param e_3x3: Number of 3x3 filters in the expand layer
+    :param name: Name of the fire module
+    :return: 
+        Returns a callable function
     """
+    # Concat on the channel axis. TensorFlow uses (rows, cols, channels), while
+    # Theano uses (channels, rows, cols).
+    concat_axis = 3
 
-    input_img = Input(shape=inputs)
-    conv1 = Conv2D(
-        96, 7, 7, activation='relu', init='glorot_uniform',
-        subsample=(2, 2), border_mode='same', name='conv1')(input_img)
-    maxpool1 = MaxPooling2D(
-        pool_size=(3, 3), strides=(2, 2), name='maxpool1')(conv1)
+    def layer(x):
+        squeeze = Convolution2D(s_1x1, 1, 1, activation='relu', init='glorot_uniform', name=name+'/squeeze1x1')(x)
+        squeeze = BatchNormalization(name=name+'/squeeze1x1_bn')(squeeze)
 
-    fire2_squeeze = Conv2D(
-        16, 1, 1, activation='relu', init='glorot_uniform',
-        border_mode='same', name='fire2_squeeze')(maxpool1)
-    fire2_expand1 = Conv2D(
-        64, 1, 1, activation='relu', init='glorot_uniform',
-        border_mode='same', name='fire2_expand1')(fire2_squeeze)
-    fire2_expand2 = Conv2D(
-        64, 3, 3, activation='relu', init='glorot_uniform',
-        border_mode='same', name='fire2_expand2')(fire2_squeeze)
-    merge2 = concatenate(
-        [fire2_expand1, fire2_expand2], axis=3)
+        # Needed to merge layers expand_1x1 and expand_3x3.
+        expand_1x1 = Convolution2D(e_1x1, 1, 1, activation='relu', init='glorot_uniform', name=name+'/expand1x1')(squeeze)
 
-    fire3_squeeze = Conv2D(
-        16, 1, 1, activation='relu', init='glorot_uniform',
-        border_mode='same', name='fire3_squeeze')(merge2)
-    fire3_expand1 = Conv2D(
-        64, 1, 1, activation='relu', init='glorot_uniform',
-        border_mode='same', name='fire3_expand1')(fire3_squeeze)
-    fire3_expand2 = Conv2D(
-        64, 3, 3, activation='relu', init='glorot_uniform',
-        border_mode='same', name='fire3_expand2')(fire3_squeeze)
-    merge3 = concatenate(
-        [fire3_expand1, fire3_expand2], axis=3)
+        # Pad the border with zeros. Not needed as border_mode='same' will do the same.
+        # expand_3x3 = ZeroPadding2D(padding=(1, 1), name=name+'_expand_3x3_padded')(squeeze)
+        expand_3x3 = Convolution2D(e_3x3, 3, 3, border_mode='same', activation='relu', init='glorot_uniform', name=name+'/expand3x3')(squeeze)
+        # Concat in the channel dim
+        expand_merge = concatenate([expand_1x1, expand_3x3], name=name+'/concat')
+        return expand_merge
+    return layer
+    
 
-    fire4_squeeze = Conv2D(
-        32, 1, 1, activation='relu', init='glorot_uniform',
-        border_mode='same', name='fire4_squeeze')(merge3)
-    fire4_expand1 = Conv2D(
-        128, 1, 1, activation='relu', init='glorot_uniform',
-        border_mode='same', name='fire4_expand1')(fire4_squeeze)
-    fire4_expand2 = Conv2D(
-        128, 3, 3, activation='relu', init='glorot_uniform',
-        border_mode='same', name='fire4_expand2')(fire4_squeeze)
-    merge4 = concatenate(
-        [fire4_expand1, fire4_expand2], axis=3)
-    maxpool4 = MaxPooling2D(
-        pool_size=(3, 3), strides=(2, 2), name='maxpool4')(merge4)
+def SqueezeNet(nb_classes, rows=224, cols=224, channels=3):
+    """
+        SqueezeNet v1.1 implementation
+    :param nb_classes: Number of classes
+    :param rows: Amount of rows in the input
+    :param cols: Amount of cols in the input
+    :param channels: Amount of channels in the input
+    :returns: SqueezeNet model
+    """
+    input_shape = (rows, cols, channels)
+    
 
-    fire5_squeeze = Conv2D(
-        32, 1, 1, activation='relu', init='glorot_uniform',
-        border_mode='same', name='fire5_squeeze')(maxpool4)
-    fire5_expand1 = Conv2D(
-        128, 1, 1, activation='relu', init='glorot_uniform',
-        border_mode='same', name='fire5_expand1')(fire5_squeeze)
-    fire5_expand2 = Conv2D(
-        128, 3, 3, activation='relu', init='glorot_uniform',
-        border_mode='same', name='fire5_expand2')(fire5_squeeze)
-    merge5 = concatenate(
-        [fire5_expand1, fire5_expand2], axis=3)
+    input_image = Input(shape=input_shape)
+    # conv1 output shape = (113, 113, 64)
+    conv1 = Convolution2D(64, 3, 3, activation='relu', subsample=(2, 2), init='glorot_uniform', name='conv1')(input_image)
+    # maxpool1 output shape = (56, 56, 64)
+    maxpool1 = MaxPooling2D(pool_size=(3, 3), strides=(2, 2), name='pool1')(conv1)
+    # fire2 output shape = (?, 56, 56, 128)
+    fire2 = FireModule(s_1x1=16, e_1x1=64, e_3x3=64, name='fire2')(maxpool1)
+    # fire3 output shape = (?, 56, 56, 128)
+    fire3 = FireModule(s_1x1=16, e_1x1=64, e_3x3=64, name='fire3')(fire2)
+    # maxpool3 output shape = (?, 27, 27, 128)
+    maxpool3 = MaxPooling2D(pool_size=(3, 3), strides=(2, 2), name='pool3')(fire3)
+    # fire4 output shape = (?, 56, 56, 256)
+    fire4 = FireModule(s_1x1=32, e_1x1=128, e_3x3=128, name='fire4')(fire3)
+    # fire5 output shape = (?, 56, 56, 256)
+    fire5 = FireModule(s_1x1=32, e_1x1=128, e_3x3=128, name='fire5')(fire4)
+    # maxpool5 output shape = (?, 27, 27, 256)
+    maxpool5 = MaxPooling2D(pool_size=(3, 3), strides=(2, 2), name='pool5')(fire5)
+    # fire6 output shape = (?, 27, 27, 384)
+    fire6 = FireModule(s_1x1=48, e_1x1=192, e_3x3=192, name='fire6')(maxpool5)
+    # fire7 output shape = (?, 27, 27, 384)
+    fire7 = FireModule(s_1x1=48, e_1x1=192, e_3x3=192, name='fire7')(fire6)
+    # fire8 output shape = (?, 27, 27, 512)
+    fire8 = FireModule(s_1x1=64, e_1x1=256, e_3x3=256, name='fire8')(fire7)
+    # fire9 output shape = (?, 27, 27, 512)
+    fire9 = FireModule(s_1x1=64, e_1x1=256, e_3x3=256, name='fire9')(fire8)
+    # Dropout after fire9 module.
+    dropout9 = Dropout(p=0.5, name='dropout9')(fire9)
+    # conv10 output shape = (?, 27, 27, nb_classes)
+    conv10 = Convolution2D(nb_classes, 1, 1, activation='relu', init='he_normal', name='conv10')(dropout9)
+    conv10 = BatchNormalization(name='conv10_bn')(conv10)
+    # avgpool10, softmax output shape = (?, nb_classes)
+    avgpool10 = GlobalAveragePooling2D(name='pool10')(conv10)
+    softmax = Activation('softmax', name='loss')(avgpool10)
 
-    fire6_squeeze = Conv2D(
-        48, 1, 1, activation='relu', init='glorot_uniform',
-        border_mode='same', name='fire6_squeeze')(merge5)
-    fire6_expand1 = Conv2D(
-        192, 1, 1, activation='relu', init='glorot_uniform',
-        border_mode='same', name='fire6_expand1')(fire6_squeeze)
-    fire6_expand2 = Conv2D(
-        192, 3, 3, activation='relu', init='glorot_uniform',
-        border_mode='same', name='fire6_expand2')(fire6_squeeze)
-    merge6 = concatenate(
-        [fire6_expand1, fire6_expand2], axis=3)
+    model = Model(input=input_image, output=[softmax])
+    return model
 
-    fire7_squeeze = Conv2D(
-        48, 1, 1, activation='relu', init='glorot_uniform',
-        border_mode='same', name='fire7_squeeze')(merge6)
-    fire7_expand1 = Conv2D(
-        192, 1, 1, activation='relu', init='glorot_uniform',
-        border_mode='same', name='fire7_expand1')(fire7_squeeze)
-    fire7_expand2 = Conv2D(
-        192, 3, 3, activation='relu', init='glorot_uniform',
-        border_mode='same', name='fire7_expand2')(fire7_squeeze)
-    merge7 = concatenate(
-        [fire7_expand1, fire7_expand2], axis=3)
 
-    fire8_squeeze = Conv2D(
-        64, 1, 1, activation='relu', init='glorot_uniform',
-        border_mode='same', name='fire8_squeeze')(merge7)
-    fire8_expand1 = Conv2D(
-        256, 1, 1, activation='relu', init='glorot_uniform',
-        border_mode='same', name='fire8_expand1')(fire8_squeeze)
-    fire8_expand2 = Conv2D(
-        256, 3, 3, activation='relu', init='glorot_uniform',
-        border_mode='same', name='fire8_expand2')(fire8_squeeze)
-    merge8 = concatenate(
-        [fire8_expand1, fire8_expand2], axis=3)
 
-    maxpool8 = MaxPooling2D(
-        pool_size=(3, 3), strides=(2, 2), name='maxpool8')(merge8)
-
-    fire9_squeeze = Conv2D(
-        64, 1, 1, activation='relu', init='glorot_uniform',
-        border_mode='same', name='fire9_squeeze')(maxpool8)
-    fire9_expand1 = Conv2D(
-        256, 1, 1, activation='relu', init='glorot_uniform',
-        border_mode='same', name='fire9_expand1')(fire9_squeeze)
-    fire9_expand2 = Conv2D(
-        256, 3, 3, activation='relu', init='glorot_uniform',
-        border_mode='same', name='fire9_expand2')(fire9_squeeze)
-    merge9 = concatenate(
-        [fire9_expand1, fire9_expand2], axis=3)
-
-    fire9_dropout = Dropout(0.5, name='fire9_dropout')(merge9)
-    conv10 = Conv2D(
-        nb_classes, 1, 1, init='glorot_uniform',
-        border_mode='valid', name='conv10')(fire9_dropout)
-    # The size should match the output of conv10
-    avgpool10 = AveragePooling2D((13, 13), name='avgpool10')(conv10)
-
-    flatten = Flatten(name='flatten')(avgpool10)
-    softmax = Activation("softmax", name='softmax')(flatten)
-
-    return Model(input=input_img, output=softmax)
